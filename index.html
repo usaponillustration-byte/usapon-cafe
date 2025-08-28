@@ -1,0 +1,236 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>喫茶ステッカー（Sticker Cafe Game）</title>
+<style>
+  :root { --panel: #ffffffee; --ink:#3f3a37; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Apple Color Emoji", "Segoe UI Emoji"; background:#f4f4f5; color:var(--ink); }
+  .wrap { max-width: 1100px; margin: 18px auto; padding: 0 12px; }
+  h1 { font-size: 22px; margin: 0 0 10px; }
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; background:var(--panel); border:1px solid #e5e7eb; padding:10px; border-radius:16px; box-shadow: 0 4px 12px #0001; }
+  .btn, label.btn { appearance: none; border:1px solid #d1d5db; border-radius: 9999px; padding:8px 12px; background:#fff; cursor:pointer; font-size: 14px; box-shadow: 0 1px 2px #0001; }
+  .btn[disabled] { opacity:.5; cursor: default; }
+  .board { position: relative; width:100%; aspect-ratio: 16 / 10; border-radius: 22px; overflow: hidden; box-shadow: 0 8px 24px #0003; user-select:none; }
+  /* 壁 */
+  .bg-wall { position:absolute; inset:0; background: linear-gradient(#fff7e6, #f8e6bd); }
+  /* メニュー掲示板 */
+  .menu { position:absolute; left:50%; transform: translateX(-50%); top:18px; width:70%; height:160px; background:#fff8ee; border: 8px solid #4a372e; border-radius: 18px; display:flex; align-items:center; justify-content:center; color:#4a372ea6; font-size:14px; }
+  /* テーブル */
+  .table { position:absolute; left:0; right:0; bottom:0; height:38%; background: linear-gradient(#b08968, #8d6e63); box-shadow: inset 0 12px 24px #0004; }
+  .palette { margin-top: 10px; display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px; }
+  .card { border:1px solid #e5e7eb; border-radius: 14px; background:#fff; overflow:hidden; box-shadow: 0 4px 10px #0001; }
+  .card button { display:block; width:100%; background:#fff; border:0; padding:0; cursor:pointer; }
+  .card img { width:100%; height:120px; object-fit:contain; background:#fff; }
+  .card .cap { padding:6px 8px; font-size: 12px; color:#6b7280; text-align:left; }
+  .sticker { position:absolute; cursor:grab; transform-origin: top left; }
+  .uibar { position:absolute; left:8px; top:8px; display:flex; gap:6px; background:var(--panel); padding:6px 8px; border-radius: 9999px; box-shadow: 0 6px 18px #0003; z-index: 999; }
+  .uibar .btn { padding:6px 10px; }
+  .hint { font-size: 12px; color:#6b7280; margin-top: 6px; }
+  .help { font-size: 13px; color:#6b7280; background:#fff; border:1px solid #e5e7eb; border-radius: 12px; padding:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>喫茶ステッカー（Sticker Cafe Game）</h1>
+  <div class="toolbar">
+    <label class="btn">画像をアップロード<input id="uploader" class="hidden" type="file" accept="image/*" style="display:none"></label>
+    <button id="exportBtn" class="btn">PNG書き出し</button>
+    <button id="clearBtn" class="btn">ぜんぶ削除</button>
+  </div>
+  <p class="hint">画像をアップすると、<b>上部は店名プレート</b>、<b>下部はクリームソーダ</b>としてパレットに追加されます。</p>
+  <div id="board" class="board">
+    <div class="bg-wall"></div>
+    <div class="menu">店名プレートをここに置くとそれっぽいよ</div>
+    <div class="table"></div>
+    <!-- Stickers will be injected here -->
+    <div id="ui" class="uibar" style="display:none" data-ui="controls">
+      <button class="btn" data-act="bigger">＋</button>
+      <button class="btn" data-act="smaller">－</button>
+      <button class="btn" data-act="rotL">↺</button>
+      <button class="btn" data-act="rotR">↻</button>
+      <button class="btn" data-act="dup">⎘</button>
+      <button class="btn" data-act="del" style="color:#b91c1c">削除</button>
+    </div>
+  </div>
+
+  <h3 style="margin-top:12px">パレット</h3>
+  <div id="palette" class="palette"></div>
+  <div class="help" style="margin-top:10px">
+    <details>
+      <summary>使い方ヘルプ</summary>
+      <ul>
+        <li>「画像をアップロード」→ 自動で分割してパレットに2つ追加（店名/ソーダ）。</li>
+        <li>パレットのサムネイルをクリック → キャンバスに配置。配置後はドラッグで移動。</li>
+        <li>左上のバーで拡大・縮小・回転・複製・削除。</li>
+        <li>進捗はこのブラウザに自動保存。PNG書き出しで画像保存。</li>
+      </ul>
+    </details>
+  </div>
+</div>
+
+<script>
+(function(){
+  const board = document.getElementById('board');
+  const paletteEl = document.getElementById('palette');
+  const uploader = document.getElementById('uploader');
+  const exportBtn = document.getElementById('exportBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const ui = document.getElementById('ui');
+
+  const storage = {
+    get(k, d){ try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+    set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  };
+
+  let palette = storage.get('scg_palette', []); // {name, src}
+  let items = storage.get('scg_items', []);     // {id, src, x, y, scale, rot, z}
+  let selectedId = null; let zCounter = 1;
+
+  function save(){ storage.set('scg_palette', palette); storage.set('scg_items', items); }
+
+  function el(tag, attrs) {
+    const n = document.createElement(tag);
+    if (attrs) Object.entries(attrs).forEach(([k,v]) => n.setAttribute(k,v));
+    return n;
+  }
+
+  function renderPalette() {
+    paletteEl.innerHTML = '';
+    if (palette.length === 0) {
+      // demo title
+      const demo = document.createElement('canvas'); demo.width = 800; demo.height = 220;
+      const ctx = demo.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0,0,800,220);
+      ctx.strokeStyle = '#4b2e2b'; ctx.lineWidth = 10; ctx.strokeRect(20,20,760,180);
+      ctx.fillStyle = '#4b2e2b'; ctx.font = 'bold 72px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('らうぃぽん喫茶', 400, 110);
+      palette.push({ name: 'デモ店名', src: demo.toDataURL('image/png') });
+      save();
+    }
+    for (const p of palette) {
+      const card = el('div', { class: 'card' });
+      const btn = el('button'); const img = el('img'); img.src = p.src; btn.appendChild(img);
+      btn.addEventListener('click', () => addSticker(p.src));
+      const cap = el('div', { class:'cap' }); cap.textContent = p.name;
+      card.appendChild(btn); card.appendChild(cap);
+      paletteEl.appendChild(card);
+    }
+  }
+
+  function addSticker(src, x, y) {
+    const id = crypto.randomUUID();
+    const rect = board.getBoundingClientRect();
+    const item = { id, src, x: (x ?? rect.width/2-100), y: (y ?? 140), scale: 1, rot: 0, z: zCounter++ };
+    items.push(item); save(); drawItems(); select(id);
+  }
+
+  function drawItems() {
+    // remove old
+    Array.from(board.querySelectorAll('img.sticker')).forEach(n => n.remove());
+    // draw by z
+    items.sort((a,b)=>a.z-b.z);
+    for (const it of items) {
+      const img = el('img', { class:'sticker', draggable:'false' });
+      img.src = it.src; img.style.left = it.x+'px'; img.style.top = it.y+'px';
+      img.style.transform = `translateZ(0) scale(${it.scale}) rotate(${it.rot}deg)`;
+      img.addEventListener('mousedown', (e)=> beginDrag(it.id, e));
+      img.addEventListener('click', (e)=> { e.stopPropagation(); select(it.id); });
+      board.appendChild(img);
+    }
+  }
+
+  function select(id) {
+    selectedId = id;
+    ui.style.display = id ? 'flex' : 'none';
+  }
+
+  function beginDrag(id, e) {
+    e.stopPropagation(); select(id);
+    const it = items.find(i=>i.id===id); if (!it) return;
+    const sx = e.clientX, sy = e.clientY; const start = { x: it.x, y: it.y };
+    function move(ev){
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      it.x = start.x + dx; it.y = start.y + dy; it.z = zCounter++;
+      save(); drawItems();
+    }
+    function up(){ window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); }
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+  }
+
+  board.addEventListener('mousedown', ()=> select(null));
+
+  ui.addEventListener('click', (e)=>{
+    const act = e.target.getAttribute('data-act'); if (!act || !selectedId) return;
+    const it = items.find(i=>i.id===selectedId); if (!it) return;
+    if (act==='bigger') it.scale = Math.min(4, +(it.scale*1.1).toFixed(3));
+    if (act==='smaller') it.scale = Math.max(0.2, +(it.scale*0.9).toFixed(3));
+    if (act==='rotL') it.rot -= 10;
+    if (act==='rotR') it.rot += 10;
+    if (act==='dup') items.push({ ...it, id: crypto.randomUUID(), x: it.x+20, y: it.y+20, z: zCounter++ });
+    if (act==='del') { items = items.filter(i=>i.id!==selectedId); select(null); }
+    save(); drawItems();
+  });
+
+  uploader.addEventListener('change', async (e)=>{
+    const file = e.target.files?.[0]; if (!file) return;
+    const parts = await splitImage(file);
+    if (parts.headerUrl) palette.push({ name:'店名プレート(画像)', src: parts.headerUrl });
+    if (parts.drinkUrl) palette.push({ name:'クリームソーダ(画像)', src: parts.drinkUrl });
+    save(); renderPalette();
+    // デモで自動配置
+    if (parts.headerUrl) addSticker(parts.headerUrl, 420, 80);
+    if (parts.drinkUrl) addSticker(parts.drinkUrl, 280, 320);
+    uploader.value = '';
+  });
+
+  clearBtn.addEventListener('click', ()=> { items = []; save(); drawItems(); select(null); });
+
+  exportBtn.addEventListener('click', async ()=>{
+    const rect = board.getBoundingClientRect();
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('xmlns','http://www.w3.org/2000/svg');
+    svg.setAttribute('width', rect.width); svg.setAttribute('height', rect.height);
+    const fo = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+    fo.setAttribute('width','100%'); fo.setAttribute('height','100%');
+    const clone = board.cloneNode(true);
+    clone.querySelector('[data-ui=\"controls\"]').remove();
+    fo.appendChild(clone); svg.appendChild(fo);
+    const data = new XMLSerializer().serializeToString(svg);
+    const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(data);
+    await new Promise(r => img.onload = r);
+    const c = document.createElement('canvas'); c.width = rect.width; c.height = rect.height;
+    const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+    const url = c.toDataURL('image/png');
+    const a = document.createElement('a'); a.href = url; a.download = 'sticker-cafe.png'; a.click();
+  });
+
+  async function splitImage(fileOrUrl){
+    const img = new Image(); img.crossOrigin = 'anonymous';
+    const src = (typeof fileOrUrl === 'string') ? fileOrUrl : URL.createObjectURL(fileOrUrl);
+    img.src = src; await new Promise((res, rej)=>{ img.onload = res; img.onerror = rej; });
+    const W = img.naturalWidth, H = img.naturalHeight;
+    const headerH = Math.round(H * 0.28);
+    // header
+    const ch = document.createElement('canvas'); ch.width = W; ch.height = headerH;
+    ch.getContext('2d').drawImage(img, 0, 0, W, headerH, 0, 0, W, headerH);
+    // drink
+    const drinkY = headerH, drinkH = H - headerH;
+    const padTop = Math.round(drinkH * 0.03), padSide = Math.round(W * 0.08), padBottom = Math.round(drinkH * 0.04);
+    const sx = padSide, sy = drinkY + padTop, sw = Math.max(1, W - padSide*2), sh = Math.max(1, drinkH - padTop - padBottom);
+    const cd = document.createElement('canvas'); cd.width = sw; cd.height = sh;
+    cd.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    if (typeof fileOrUrl !== 'string') URL.revokeObjectURL(src);
+    return { headerUrl: ch.toDataURL('image/png'), drinkUrl: cd.toDataURL('image/png') };
+  }
+
+  // boot
+  renderPalette();
+  drawItems();
+})();
+</script>
+</body>
+</html>
